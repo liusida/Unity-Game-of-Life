@@ -1,0 +1,78 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Init
+#pragma kernel Update
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+float randomSeed;
+float initThreshold;
+
+float random( float2 p )
+{
+    float2 K1 = float2(
+        23.14069263277926, // e^pi (Gelfond's constant)
+         2.665144142690225 // 2^sqrt(2) (Gelfondâ€“Schneider constant)
+    );
+
+    return frac( cos( dot(p,K1) ) * 12345.6789 );
+}
+
+[numthreads(8,8,1)]
+void Init (uint3 id : SV_DispatchThreadID)
+{
+    float randomNumber = 0.0;
+    randomNumber = random(id.xy);
+    randomNumber = random(float2(randomNumber, randomSeed));
+    
+    if (randomNumber<initThreshold) {
+        Result[id.xy] = float4(1.0, 0.0, 0.0, 0.0);
+    } else {
+        Result[id.xy] = float4(0.0, 0.0, 0.0, 0.0);
+    }
+}
+
+[numthreads(8,8,1)]
+void Update (uint3 id : SV_DispatchThreadID)
+{
+    uint2 pos = uint2(id.x, id.y);
+    
+    float4 pixel = Result[pos];
+    
+    // Counting neighbors
+    uint neighborCount = 0;
+    for (int i=-1;i<2;i++) {
+        for (int j=-1;j<2;j++) {
+            if (i==0 && j==0) {
+                continue;
+            }
+            uint2 neighborPos = uint2(id.x+i, id.y+j);
+            float4 neighbor = Result[neighborPos];
+            if (neighbor.r > 0.5) {
+                neighborCount ++;
+            }
+        }
+    }
+
+    // Apply rules
+    if (pixel.r > 0.5) {
+        if (neighborCount<2) {
+            // Any live cell with fewer than two live neighbours dies, as if by underpopulation.
+            pixel.r = 0.0; 
+            } else if (neighborCount<4) {
+            // Any live cell with two or three live neighbours lives on to the next generation.
+            pixel.r = 1.0;
+            } else {
+            // Any live cell with more than three live neighbours dies, as if by overpopulation.
+            pixel.r = 0.0;
+        }
+        } else {
+        if (neighborCount==3) {
+            // Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction.
+            pixel.r = 1.0;
+        }
+    }
+
+    Result[pos] = pixel;
+}
+
