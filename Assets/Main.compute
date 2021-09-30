@@ -1,0 +1,102 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSInit
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> tex1, tex2;
+bool isOddFrame;
+float randomSeed;
+float initThreshold;
+float4 cellColor;
+float4 emptyColor;
+
+float random( float2 p )
+{
+    float2 K1 = float2(
+        23.14069263277926, // e^pi (Gelfond's constant)
+         2.665144142690225 // 2^sqrt(2) (Gelfondâ€“Schneider constant)
+    );
+
+    return frac( cos( dot(p,K1) ) * 12345.6789 );
+}
+
+[numthreads(8,8,1)]
+void CSInit (uint3 id : SV_DispatchThreadID)
+{
+    float randomNumber = random(float2(randomSeed, id.x));
+    randomNumber = random(float2(randomNumber, id.y));
+    randomNumber = random(float2(randomSeed, randomNumber));
+    
+    if (randomNumber<initThreshold) {
+        tex1[id.xy] = cellColor;
+        tex2[id.xy] = cellColor;
+    } else {
+        tex1[id.xy] = emptyColor;
+        tex2[id.xy] = emptyColor;
+    }
+}
+
+bool compare(float4 a, float4 b) {
+    float3 delta = abs(a.rgb - b.rgb);
+    return length(delta)<0.01;
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    uint2 pos = uint2(id.x, id.y);
+    
+    float4 pixel;
+    if (isOddFrame) {
+        pixel = tex2[pos];
+    } else {
+        pixel = tex1[pos];
+    }
+    
+    // Counting neighbors
+    uint neighborCount = 0;
+    for (int i=-1;i<2;i++) {
+        for (int j=-1;j<2;j++) {
+            if (i==0 && j==0) {
+                continue;
+            }
+            uint2 neighborPos = uint2(id.x+i, id.y+j);
+            float4 neighbor;
+            if (isOddFrame) {
+                neighbor = tex2[neighborPos];
+            } else {
+                neighbor = tex1[neighborPos];
+            }
+            if (compare(neighbor, cellColor)) {
+                neighborCount ++;
+            }
+        }
+    }
+
+    // Apply rules
+    if (compare(pixel, cellColor)) {
+        if (neighborCount<2) {
+            // Any live cell with fewer than two live neighbours dies, as if by underpopulation.
+            pixel = emptyColor; 
+            } else if (neighborCount<4) {
+            // Any live cell with two or three live neighbours lives on to the next generation.
+            pixel = cellColor;
+            } else {
+            // Any live cell with more than three live neighbours dies, as if by overpopulation.
+            pixel = emptyColor;
+        }
+        } else {
+        if (neighborCount==3) {
+            // Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction.
+            pixel = cellColor;
+        }
+    }
+
+    if (isOddFrame) {
+        tex1[pos] = pixel;
+    } else {
+        tex2[pos] = pixel;
+    }
+
+}
